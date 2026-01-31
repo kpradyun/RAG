@@ -1,0 +1,18 @@
+# Ignore the virtual environment
+.venv/
+venv/
+env/
+
+# Ignore python cache
+__pycache__/
+*.pyc
+
+# Ignore system files
+.DS_Store
+
+# Ignore the vector database (we want to rebuild it fresh)
+faiss_index/
+
+# Ignore secrets
+.env
+.streamlit/secrets.toml
