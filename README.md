@@ -1,5 +1,7 @@
 # RAG Document Analyzer
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A **Retrieval-Augmented Generation (RAG)** application that lets you chat with your documents.  
 Upload **PDF, DOCX, or TXT** files and ask questions strictly based on their content.
 
