@@ -1,41 +1,9 @@
 # RAG Document Analyzer
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io)
 
-A **Retrieval-Augmented Generation (RAG)** application that lets you chat with your documents. Upload **PDF, DOCX, or TXT** files and ask questions — answers are grounded **strictly** in the document content, not hallucinated.
-
----
-
-## What This Project Demonstrates
-
-- End-to-end RAG pipeline: document loading → chunking → embedding → retrieval → generation
-- Two interfaces: a polished **Streamlit web app** and a lightweight **CLI tool**
-- Practical use of **LangChain**, **FAISS** (CPU vector search), and **Google Gemini 2.5 Flash**
-- Secure API key handling via Streamlit secrets or environment variables
-- Graceful error handling for missing keys, bad files, API quota issues, and injection attempts
-
----
-
-## Architecture
-
-```
-User Query
-    │
-    ▼
-[FAISS Vector Store]  ←─── Uploaded Document
-    │                         └─ Loaded → Split → Embedded (text-embedding-004)
-    │  similarity_search(k=4)
-    ▼
-[Relevant Chunks]
-    │
-    ▼
-[Gemini 2.5 Flash]  ← strict "answer from context only" prompt
-    │
-    ▼
-[Grounded Answer]
-```
+A **Retrieval-Augmented Generation (RAG)** application that lets you chat with your documents.  
+Upload **PDF, DOCX, or TXT** files and ask questions strictly based on their content.
 
 ---
 
