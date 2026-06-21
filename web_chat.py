@@ -33,6 +33,7 @@ st.set_page_config(
 )
 
 SUPPORTED_EXTENSIONS = {"pdf", "txt", "docx"}
+MAX_HISTORY_PAIRS = 5  # how many prior Q&A turns to pass as context
 
 # =========================================================
 # API KEY HANDLING  (secrets → env var → sidebar input)
@@ -68,7 +69,7 @@ if not api_ready:
 for key, default in [
     ("vector_db", None),
     ("chat_history", []),
-    ("doc_name", None),
+    ("doc_names", []),
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -120,7 +121,6 @@ def process_uploaded_file(uploaded_file) -> Optional[FAISS]:
             st.error("The file appears to be empty or unreadable.")
             return None
 
-        # Warn if suspicious content detected
         combined_text = " ".join(d.page_content for d in documents)
         if _check_prompt_injection(combined_text):
             st.warning(
@@ -149,40 +149,80 @@ def process_uploaded_file(uploaded_file) -> Optional[FAISS]:
             os.remove(tmp_path)
 
 
+def process_multiple_files(uploaded_files) -> Optional[FAISS]:
+    """Process multiple uploaded files and merge into a single FAISS store."""
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
+    merged_db = None
+
+    for uploaded_file in uploaded_files:
+        db = process_uploaded_file(uploaded_file)
+        if db is None:
+            continue
+        if merged_db is None:
+            merged_db = db
+        else:
+            merged_db.merge_from(db)
+
+    return merged_db
+
+
+def _build_history_context() -> str:
+    """Format the last N chat exchanges as plain text for the LLM prompt."""
+    history = st.session_state.chat_history[:-1]  # exclude current user message
+    pairs = []
+    for i in range(0, len(history) - 1, 2):
+        if i + 1 < len(history):
+            pairs.append(
+                f"User: {history[i]['content']}\n"
+                f"Assistant: {history[i + 1]['content']}"
+            )
+    recent = pairs[-MAX_HISTORY_PAIRS:]
+    return "\n\n".join(recent)
+
+
 # =========================================================
 # SIDEBAR
 # =========================================================
 with st.sidebar:
-    st.header("📄 Document")
+    st.header("📄 Documents")
 
-    uploaded_file = st.file_uploader(
-        "Upload PDF, TXT, or DOCX",
+    uploaded_files = st.file_uploader(
+        "Upload PDF, TXT, or DOCX (one or more)",
         type=list(SUPPORTED_EXTENSIONS),
-        help="Max 200 MB. Content is never stored permanently.",
+        accept_multiple_files=True,
+        help="Max 200 MB per file. Content is never stored permanently.",
     )
 
-    if uploaded_file:
-        if st.session_state.doc_name != uploaded_file.name:
-            # New file uploaded — reset state
+    if uploaded_files:
+        current_names = sorted(f.name for f in uploaded_files)
+        if current_names != sorted(st.session_state.doc_names):
+            # File list changed — reset everything
             st.session_state.vector_db = None
             st.session_state.chat_history = []
-            st.session_state.doc_name = uploaded_file.name
+            st.session_state.doc_names = current_names
 
         if st.session_state.vector_db is None:
-            with st.spinner(f"Processing **{uploaded_file.name}**…"):
-                db = process_uploaded_file(uploaded_file)
+            label = (
+                uploaded_files[0].name
+                if len(uploaded_files) == 1
+                else f"{len(uploaded_files)} documents"
+            )
+            with st.spinner(f"Processing **{label}**…"):
+                db = process_multiple_files(uploaded_files)
             if db:
                 st.session_state.vector_db = db
-                st.success("✅ Ready! Ask your first question below.")
+                st.success(f"✅ Ready! {len(uploaded_files)} document(s) loaded.")
             else:
-                st.session_state.doc_name = None
+                st.session_state.doc_names = []
 
     if st.session_state.vector_db:
-        st.markdown(f"**Active:** `{st.session_state.doc_name}`")
+        st.markdown("**Active documents:**")
+        for name in st.session_state.doc_names:
+            st.markdown(f"- `{name}`")
         if st.button("🗑️ Clear & Start Over"):
             st.session_state.vector_db = None
             st.session_state.chat_history = []
-            st.session_state.doc_name = None
+            st.session_state.doc_names = []
             st.rerun()
 
     st.divider()
@@ -194,12 +234,12 @@ with st.sidebar:
 # =========================================================
 st.title("📊 RAG Document Analyzer")
 st.caption(
-    "Upload a document and ask questions. Answers are grounded **strictly** in "
+    "Upload documents and ask questions. Answers are grounded **strictly** in "
     "the uploaded content — the model will not use outside knowledge."
 )
 
 if not st.session_state.vector_db:
-    st.info("👈 Upload a document in the sidebar to start a conversation.")
+    st.info("👈 Upload one or more documents in the sidebar to start a conversation.")
     st.stop()
 
 # Render chat history
@@ -210,7 +250,7 @@ for msg in st.session_state.chat_history:
 # =========================================================
 # CHAT INPUT
 # =========================================================
-user_prompt = st.chat_input("Ask a question about the document…")
+user_prompt = st.chat_input("Ask a question about the document(s)…")
 
 if user_prompt:
     user_prompt = user_prompt.strip()
@@ -225,22 +265,30 @@ if user_prompt:
             try:
                 docs = st.session_state.vector_db.similarity_search(user_prompt, k=4)
                 context = "\n\n---\n\n".join(d.page_content for d in docs)
+                history_text = _build_history_context()
 
                 llm = ChatGoogleGenerativeAI(
                     model="models/gemini-2.5-flash",
                     temperature=0.2,
                 )
 
+                history_section = (
+                    f"\nCONVERSATION HISTORY (for context only — do not use as source):\n"
+                    f"{history_text}\n"
+                    if history_text
+                    else ""
+                )
+
                 system_prompt = f"""You are a precise document assistant.
-Your task is to answer the user's question based ONLY on the CONTEXT below.
-Do not use any outside knowledge or make assumptions beyond what is written.
+Answer the question based ONLY on the DOCUMENT CONTEXT below.
+Do not use any outside knowledge or information from the conversation history as a primary source.
 If the answer is not present in the context, respond exactly with:
-"I cannot find that information in the uploaded document."
+"I cannot find that information in the uploaded document(s)."
 
-CONTEXT:
+DOCUMENT CONTEXT:
 {context}
-
-QUESTION:
+{history_section}
+CURRENT QUESTION:
 {user_prompt}
 
 ANSWER:"""
